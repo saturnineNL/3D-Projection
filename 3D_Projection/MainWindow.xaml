@@ -74,7 +74,7 @@
                  BorderBrush="#F03D95DE"
                  Foreground="White"
                  BorderThickness="3,2,2,2"
-                 SelectionBrush="{x:Null}"              
+                 SelectionBrush="{x:Null}"
                  Padding="0,0,10,0" />
         <Grid x:Name="selectGrid"
               HorizontalAlignment="Center"

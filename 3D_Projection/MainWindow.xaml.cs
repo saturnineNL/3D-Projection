@@ -44,9 +44,15 @@ namespace _3D_Projection
         private double minDist = 0;
         private double zoom = 7.5;
 
-        private double targetX;
-        private double targetY;
-        private double targetZ;
+        private double targetSX;
+        private double targetSY;
+        private double targetSZ;
+
+        private double moveX;
+        private double moveY;
+        private double moveZ;
+
+        private int moveCounter = 0;
 
         private double delta = 0;
         private double currentDist = 64; 
@@ -58,6 +64,7 @@ namespace _3D_Projection
         double stepX;
         double stepY;
         double stepZ;
+
         private double stepD;
 
         public Point3D displacement = new Point3D();
@@ -76,12 +83,15 @@ namespace _3D_Projection
         bool render = false;
 
         private bool lmb = false;
+        private bool starLMB = false;
 
         private bool init = false;
 
         List<string> inputList = new List<string>();
 
-        List<Star> parkCollection = new List<Star>(); 
+        List<Star> parkCollection = new List<Star>();
+
+        private Point3D movePoint;
 
         private string oldSearch = "";
 
@@ -99,7 +109,6 @@ namespace _3D_Projection
         private void initDB()
         {
             timer.Tick += Timer_Tick;
-            
 
             String systemDataSet = EmbeddedRead.GetJSON();
 
@@ -147,14 +156,13 @@ namespace _3D_Projection
             findTargetSystem(targetSystem);
         }
 
-        
-
-        private void findTargetSystem(int target)
+        private void findTargetSystem(int target,double maxDist=-1)
 
         {
             targetSystem = target;
 
             starCollection.Clear();
+
             parkCollection.Clear();
 
             double targetX = starSystemCollection[target].x;
@@ -165,7 +173,12 @@ namespace _3D_Projection
 
             currentDist = 64;
             minDist = 0;
-            maxDist = 64;
+            
+
+            if (maxDist < 0)
+            {
+                maxDist = 64;                
+            }
 
             zoom = (64 / maxDist) * 7.5;
 
@@ -196,6 +209,10 @@ namespace _3D_Projection
                     star.rotaY = 0;
                     star.rotaZ = 0;
 
+                    star.moveX = 0;
+                    star.moveY = 0;
+                    star.moveZ = 0;
+
                     star.centerX = ProjectionViewCanvas.Width/2;
                     star.centerY = ProjectionViewCanvas.Height/2;
 
@@ -223,11 +240,12 @@ namespace _3D_Projection
 
             timer.Interval = TimeSpan.FromMilliseconds(50);
             mover.Interval = TimeSpan.FromMilliseconds(50);
+
             timer.Start();
 
             xFactor = 0.0;
             yFactor = 0.0;
-            zFactor = 0.0;
+            zFactor = 0.25;
 
         }
 
@@ -250,7 +268,8 @@ namespace _3D_Projection
 
             DrawControls();
 
-            
+            targetStar = -1;
+
             foreach (var star in starCollection.OrderBy(p => p.Z))
             {
                 star.rotaX = rx;
@@ -260,66 +279,134 @@ namespace _3D_Projection
                 star.elevation = elevation;
                 star.azimuth = azimuth;
 
-                star.Draw3D();
-
                 star.SetEllipseSize();
+
+                star.Draw3D();
 
                 star.setColor();
 
                 star.SetLabel();
-
-                if (star.distance == 0)
-                {
-                    targetStar = starCollection.FindIndex(p => p.distance==0); }
-
-                if (star.selectedName != "insert name here")
-                {
-
-                    double distance = calculateDistance(targetSystem, star.starID);
-
-                    targetDistance = distance;
-
-                    targetSystem = star.starID;
-
-                    displacement.X = star.X *-1;
-                    displacement.Y = star.Y * -1;
-                    displacement.Z = star.Z *-1;
-
-                    inputBox.Text = star.name + " [ " + star.X.ToString("F") + " + " + displacement.X.ToString("F") ;
-                    star.selectedName = "insert name here";
-
-                    timer.Stop();
-
-                    initMover();
-
-                    mover.Tick += Mover_Tick;
-
-                    mover.Start();
-                }
-                
                 
                 ProjectionViewCanvas.Children.Add(star.starCanvas);
+
+                if (star.selectedName != "insert name here" && targetSystem!=star.starID)
+                {
+                    targetStar = star.starID;
+
+                    star.selectedName = "insert name here";
+
+                }
+
+            }
+
+            if (targetStar >= 0)
+            {
+                 timer.Stop();
+
+                 initMover();
+
+                mover.Tick += Mover_Tick;
+
+                mover.Start();
+            }
+
+        }
+
+        private int tickTotal = 20;
+        private int tickCount = 0;
+
+        private void initMover()
+        {
+            tickTotal = 20;
+            tickCount = 0;
+
+            double centerX = starSystemCollection[targetSystem].x;
+            double centerY = starSystemCollection[targetSystem].y;
+            double centerZ = starSystemCollection[targetSystem].z;
+
+            double oppositeX = (starSystemCollection[targetSystem].x - starSystemCollection[targetStar].x) * -1;
+            double oppositeY = (starSystemCollection[targetSystem].y - starSystemCollection[targetStar].y) * -1;
+            double oppositeZ = (starSystemCollection[targetSystem].z - starSystemCollection[targetStar].z) * -1;
+
+            inputBox.Text = "XYZ:[" + oppositeX.ToString("F") + "," + oppositeY.ToString("F") + "," + oppositeZ.ToString("F") + "] ";
+
+            foreach (var systemNames in starSystemCollection.OrderBy(p => p.Value.z))
+            {
+
+                double distance = calculateDistance(targetSystem, systemNames.Key,new Point3D(oppositeX, oppositeY, oppositeZ));
+
+                if (distance == 0 || (distance >= minDist && distance <= maxDist))
+
+                {
+                    if (starCollection.FindIndex(p => p.starID == systemNames.Key) == -1)
+                    {
+                        Star star = new Star();
+
+                        star.starID = systemNames.Key;
+
+                        star.SetName(systemNames.Value.name);
+
+                        star.X = (centerX - systemNames.Value.x)*zoom;
+                        star.Y = (centerY - systemNames.Value.y)*zoom;
+                        star.Z = (centerZ - systemNames.Value.z)*zoom;
+
+                        star.originX = systemNames.Value.x;
+                        star.originY = systemNames.Value.y;
+                        star.originZ = systemNames.Value.z;
+
+                        star.elevation = elevation;
+                        star.azimuth = azimuth;
+
+                        star.rotaX = 0;
+                        star.rotaY = 0;
+                        star.rotaZ = 0;
+
+                        star.moveX = 0;
+                        star.moveY = 0;
+                        star.moveZ = 0;
+
+                        star.centerX = ProjectionViewCanvas.Width/2;
+                        star.centerY = ProjectionViewCanvas.Height/2;
+
+                        star.distance = calculateDistance(star.starID, targetSystem);
+
+                        star.maxDistance = maxDist;
+
+                        star.rendered = false;
+
+                        star.size = 3;
+
+                        star.SetEllipseSize();
+
+                        star.setColor();
+
+                        star.SetLabel();
+
+                        starCollection.Add(star);
+                    }
+
+                }
 
             }
 
         }
 
-        private void initMover()
-        {
-            totalTicks = 10;
-
-            stepX = displacement.X  / totalTicks;
-            stepY = displacement.Y  / totalTicks;
-            stepZ = displacement.Z  / totalTicks;
-
-            stepD = targetDistance/totalTicks;
-        }
-
         private void Mover_Tick(object sender, EventArgs e)
         {
+
             ProjectionViewCanvas.Children.Clear();
 
-            totalTicks -= 1;
+            double centerX = starSystemCollection[targetSystem].x;
+            double centerY = starSystemCollection[targetSystem].y;
+            double centerZ = starSystemCollection[targetSystem].z;
+
+            double targetX = starSystemCollection[targetStar].x;
+            double targetY = starSystemCollection[targetStar].y;
+            double targetZ = starSystemCollection[targetStar].z;
+
+            double offsetX = (targetX - centerX) / tickTotal;
+            double offsetY = (targetY - centerY) / tickTotal;
+            double offsetZ = (targetZ - centerZ) / tickTotal;
 
             Drawplane();
 
@@ -327,51 +414,92 @@ namespace _3D_Projection
 
             DrawControls();
 
-            foreach (var star in starCollection)
-                {
+            rx += xFactor;
+            ry += yFactor;
+            rz += zFactor;
 
+            foreach (var star in starCollection.OrderBy(p => p.Z))
+            {
 
-                star.distance = calculateDistance(targetSystem, star.starID);
+                star.X =  (centerX - star.originX)  * zoom;
+                star.Y =  (centerY - star.originY)  * zoom;
+                star.Z =  (centerZ - star.originZ)  * zoom;
 
-                star.X += stepX;
-                star.Y += stepY;
-                star.Z += stepZ;
-
-                star.maxDistance = maxDist;
+                star.elevation = elevation;
+                star.azimuth = azimuth;
 
                 star.rotaX = rx;
                 star.rotaY = ry;
                 star.rotaZ = rz;
 
-                star.elevation = elevation;
-                star.azimuth =azimuth;
+                 star.moveX -= offsetX * zoom;
+                 star.moveY -= offsetY * zoom;
+                 star.moveZ -= offsetZ * zoom; 
+
+                star.distance = calculateDistance( star.starID,targetSystem,new Point3D(star.moveX/zoom, star.moveY/zoom, star.moveZ/zoom));
+
+                star.SetEllipseSize();
+
+                if (star.starID == targetSystem)
+                {
+                    star.starSEL.Visibility = Visibility.Hidden;
+                }
+
+                star.setColor();
+
+                if (star.starID == targetStar)
+                {
+                    star.starSEL.Visibility = Visibility.Visible;
+                    star.starGFX.Fill = new SolidColorBrush(Colors.AliceBlue); ;
+                    star.starSEL.Stroke = new SolidColorBrush(Colors.AliceBlue); ;
+
+                    star.starGFX.Width = 24;
+                    star.starGFX.Height = 24;
+
+                    star.starSEL.Width = star.starGFX.Width * 2;
+                    star.starSEL.Height = star.starGFX.Height * 2;
+
+                    star.starSEL.StrokeThickness = 4;
+
+                    star.starLabel.Visibility = Visibility.Visible;
+
+                    star.starLabel.FontSize = 28;
+
+                    star.starLabel.Foreground = new SolidColorBrush(Colors.AliceBlue);
+
+                    //  starLabel.Background= new SolidColorBrush(Colors.Red);
+
+                    star.starLabel.Width = 7 * 28;
+                    star.starLabel.Height = 3.5 * 28;
+
+                    star.starLabel.HorizontalContentAlignment = HorizontalAlignment.Left;
+                    star.starLabel.VerticalContentAlignment = VerticalAlignment.Top;
+
+                    star.starLabel.Margin = new Thickness(30, -20, 0, 0);
+
+                 //   if (star.splitName.Length > 0) star.starLabel.Margin = new Thickness(30, -40, 0, 0);
+                }
 
                 star.Draw3D();
 
-                
-
-                ProjectionViewCanvas.Children.Add(star.starCanvas);
-
-                    //if (star.starID == targetSystem)
-                    //{
-                    //    inputBox.Text = star.name + " [ " + star.X.ToString("F") + " , " + star.X.ToString("F") + " , " +
-                    //                    star.X.ToString("F") + " ] -> "+ starCollection[targetStar].X.ToString("F") + " , " + starCollection[targetStar].Y.ToString("F") + " , " + starCollection[targetStar].Z.ToString("F");
-                    //}
-
+                if (star.distance<maxDist) { ProjectionViewCanvas.Children.Add(star.starCanvas);}
             }
 
-            
+            tickCount += 1;
 
-            if (totalTicks == 0)
+            if (tickCount >= tickTotal)
             {
-                mover.Stop();
-                mover.Tick -= Mover_Tick;
+                tickCount = 0;
+                targetSystem = targetStar;
 
+                findTargetSystem(targetSystem,maxDist);
+
+                mover.Stop();
+
+                mover.Tick -= Mover_Tick;
 
                 timer.Start();
             }
-
-
         }
 
         private void DrawControls()
@@ -479,16 +607,42 @@ namespace _3D_Projection
             return result;
         }
 
-        private double calculateDistance(int homeSystem, int targetSystem)
+        private double calculateDistance(int homeSystem, int targetSystem,Point3D startPoint = default(Point3D), Point3D endPoint = default(Point3D))
         {
             double distance = -1;
 
-            double homeSystemX = starSystemCollection[homeSystem].x; double homeSystemY= starSystemCollection[homeSystem].y; double homeSystemZ = starSystemCollection[homeSystem].z;
-            double targetSystemX = starSystemCollection[targetSystem].x; double targetSystemY = starSystemCollection[targetSystem].y; double targetSystemZ = starSystemCollection[targetSystem].z;
+            double homeSystemX = 0; 
+            double homeSystemY = 0; 
+            double homeSystemZ = 0; 
 
-            double distanceX=999999;
-            double distanceY=999999;
-            double distanceZ=999999;
+            if (homeSystem >= 0)
+            {
+                homeSystemX = starSystemCollection[homeSystem].x;
+                homeSystemY = starSystemCollection[homeSystem].y;
+                homeSystemZ = starSystemCollection[homeSystem].z;
+            }
+
+            double targetSystemX = 0;
+            double targetSystemY = 0;
+            double targetSystemZ = 0;
+
+            if (targetSystem >= 0)
+            {
+                targetSystemX = starSystemCollection[targetSystem].x;
+                targetSystemY = starSystemCollection[targetSystem].y;
+                targetSystemZ = starSystemCollection[targetSystem].z;
+            }
+            homeSystemX += startPoint.X;
+            homeSystemY += startPoint.Y;
+            homeSystemZ += startPoint.Z;
+
+            targetSystemX += endPoint.X;
+            targetSystemY += endPoint.Y;
+            targetSystemZ += endPoint.Z; 
+
+            double distanceX=99999999;
+            double distanceY= 99999999;
+            double distanceZ= 99999999;
 
             if (homeSystemX <= 0 && targetSystemX < 0) distanceX = Math.Min(homeSystemX, targetSystemX) + Math.Abs(Math.Max(homeSystemX, targetSystemX));
             if (homeSystemY <= 0 && targetSystemY < 0) distanceY = Math.Min(homeSystemY, targetSystemY) + Math.Abs(Math.Max(homeSystemY, targetSystemY));
@@ -506,14 +660,20 @@ namespace _3D_Projection
             if (homeSystemY == targetSystemY) distanceY = 0;
             if (homeSystemZ == targetSystemZ) distanceZ = 0;
 
+            displacement.X = distanceX;
+            displacement.Y = distanceY;
+            displacement.Z = distanceZ;
+
             distance = Math.Sqrt(Math.Pow(distanceX, 2) + Math.Pow(distanceY, 2) + Math.Pow(distanceZ, 2));
 
             return distance;
+
+           
         }       
 
         private void lmbd_Handler(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
-            if (!lmb)
+            if (!lmb && !starLMB)
             {
                 reference.X = Mouse.GetPosition(ProjectionViewCanvas).X-(ProjectionViewCanvas.Width/2);
                 reference.Y = Mouse.GetPosition(ProjectionViewCanvas).Y-(ProjectionViewCanvas.Height/2);
@@ -616,7 +776,7 @@ namespace _3D_Projection
 
             }
 
-            if (currentDist < maxDist)
+            else if (currentDist < maxDist)
             {
 
                 if (parkCollection.Count == 0)
@@ -632,8 +792,7 @@ namespace _3D_Projection
 
                         {
                             count += 1;
-                            
-
+ 
                             Star star = new Star();
 
                             star.starID = systemNames.Key;
@@ -672,7 +831,7 @@ namespace _3D_Projection
                     }
                 }
 
-                var find = parkCollection.FindAll(p =>p.distance >minDist && p.distance < maxDist);
+                var find = parkCollection.FindAll(p => p.distance > minDist && p.distance < maxDist);
 
                 foreach (var item in find)
                 {
@@ -784,10 +943,7 @@ namespace _3D_Projection
 
                 selectGrid.Children.Clear();
 
-                foreach (
-                    var system in
-                        starSystemCollection.Where(p => p.Value.name.ToLower().IndexOf(search.ToLower()) != -1)
-                            .OrderBy(p => p.Value.name))
+                foreach (var system in starSystemCollection.Where(p => p.Value.name.ToLower().IndexOf(search.ToLower()) != -1).OrderBy(p => p.Value.name))
                 {
                     systemNames.Add(system.Value.name);
 
@@ -845,6 +1001,8 @@ namespace _3D_Projection
 
         private string splitName="";
 
+        
+
         public Star()
         {
             starGFX = new Ellipse();
@@ -860,6 +1018,8 @@ namespace _3D_Projection
 
             starCanvas.Children.Add(starSEL);
 
+            starSEL.Visibility = Visibility.Hidden;
+
             starGFX.Fill = backgroundBrush;
 
             starLabel.FontFamily = new FontFamily(new Uri("pack://application:,,,/Dataset/"), "./#Euro Caps");
@@ -869,18 +1029,26 @@ namespace _3D_Projection
 
             selectedName = "insert name here";
 
-            starCanvas.MouseLeftButtonDown += systemClick;
+            starGFX.MouseLeftButtonDown += systemClick;
+
+            
         }
 
         private void systemClick(object sender, MouseButtonEventArgs e)
         {
-            Canvas selectedSystem = sender as Canvas;
+            Ellipse selectedSystem = sender as Ellipse;
 
             if (selectedSystem != null)
             {
-                selectedSystem.Background  =new SolidColorBrush(Colors.White);
+                selectedSystem.Fill  =new SolidColorBrush(Colors.White);
 
-                this.selectedName = name;
+                starSEL.Width = starGFX.Width * 2;
+                starSEL.Height = starGFX.Height * 2;
+
+                starSEL.Visibility = Visibility.Visible;
+
+                selectedName = name;
+
             }
         }
 
@@ -899,6 +1067,7 @@ namespace _3D_Projection
             starGFX.Width = size;
             starGFX.Height = size;
 
+
             if (distance == 0)
             {
                 starGFX.Width = 24;
@@ -906,7 +1075,10 @@ namespace _3D_Projection
 
                 starSEL.Width = starGFX.Width*2;
                 starSEL.Height = starGFX.Height*2;
+
                 starSEL.StrokeThickness = 4;
+
+                starSEL.Visibility = Visibility.Visible;
             }
         }
 
@@ -996,8 +1168,10 @@ namespace _3D_Projection
 
                 starLabel.Foreground= new SolidColorBrush(Colors.AliceBlue);
 
-                starLabel.Width = 600;
-                starLabel.Height = 300;
+              //  starLabel.Background= new SolidColorBrush(Colors.Red);
+
+                starLabel.Width = 7*28;
+                starLabel.Height = 3.5*28;
 
                 starLabel.HorizontalContentAlignment = HorizontalAlignment.Left;
                 starLabel.VerticalContentAlignment = VerticalAlignment.Top;
@@ -1011,9 +1185,9 @@ namespace _3D_Projection
 
         private Point Calc3D()
         {
-            double x = X;
-            double y = Y;
-            double z = Z;
+            double x = X-moveX;
+            double y = Y-moveY;
+            double z = Z-moveZ;
 
             double rx = rotaX;
             double ry = rotaY;
@@ -1055,7 +1229,6 @@ namespace _3D_Projection
 
         public Ellipse starGFX { get; set; }
         public Ellipse starSEL { get; set; }
-
        
         public Label starLabel { get; set; }
         public Canvas starCanvas { get; set; }
@@ -1076,6 +1249,10 @@ namespace _3D_Projection
         public double rotaX { get; set; }
         public double rotaY { get; set; }
         public double rotaZ { get; set; }
+
+        public double moveX { get; set; }
+        public double moveY { get; set; }
+        public double moveZ { get; set; }
 
         public double azimuth { get; set; }
         public double elevation { get; set; }
